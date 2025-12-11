@@ -1,0 +1,36 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* 1. Class untuk MENYEMBUNYIKAN scrollbar (Dipakai di Slider Saham) */
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.hide-scrollbar {
+  -ms-overflow-style: none; /* IE and Edge */
+  scrollbar-width: none;    /* Firefox */
+}
+
+/* 2. Class untuk MEMPERCANTIK scrollbar (Dipakai di Statistik Deskriptif) */
+.custom-scroll::-webkit-scrollbar {
+  width: 6px; /* Lebar scrollbar tipis */
+}
+.custom-scroll::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.05); /* Warna jalur scroll transparan */
+  border-radius: 10px;
+}
+.custom-scroll::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2); /* Warna batang scroll */
+  border-radius: 10px;
+}
+.custom-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.4); /* Warna saat di-hover */
+}
+
+/* 3. Global Styles (Opsional: Agar background halaman tidak putih saat loading) */
+body {
+  background-color: #E8EFF5;
+  margin: 0;
+  padding: 0;
+  overflow: hidden; /* Mencegah scroll pada body utama karena kita pakai layout 100vh */
+}
