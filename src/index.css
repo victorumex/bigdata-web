@@ -2,7 +2,7 @@
 @tailwind components;
 @tailwind utilities;
 
-/* 1. Class untuk MENYEMBUNYIKAN scrollbar (Dipakai di Slider Saham) */
+/* 1. Sembunyikan Scrollbar (Untuk Slider Saham Horizontal) */
 .hide-scrollbar::-webkit-scrollbar {
   display: none;
 }
@@ -11,26 +11,26 @@
   scrollbar-width: none;    /* Firefox */
 }
 
-/* 2. Class untuk MEMPERCANTIK scrollbar (Dipakai di Statistik Deskriptif) */
-.custom-scroll::-webkit-scrollbar {
-  width: 6px; /* Lebar scrollbar tipis */
+/* 2. Custom Scrollbar Keren (Untuk Daftar Berita Vertikal) */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
 }
-.custom-scroll::-webkit-scrollbar-track {
-  background: rgba(255, 255, 255, 0.05); /* Warna jalur scroll transparan */
-  border-radius: 10px;
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: #0A132C; /* Latar belakang track (Gelap) */
+  border-radius: 3px;
 }
-.custom-scroll::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.2); /* Warna batang scroll */
-  border-radius: 10px;
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #4B8BF5; /* Batang scroll (Biru Neon) */
+  border-radius: 3px;
 }
-.custom-scroll::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.4); /* Warna saat di-hover */
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #6CA4FF; /* Warna saat mouse hover */
 }
 
-/* 3. Global Styles (Opsional: Agar background halaman tidak putih saat loading) */
+/* 3. Global Styles (Opsional: Background Body) */
 body {
-  background-color: #E8EFF5;
+  background-color: #0B1221; /* Sesuai variable BG_DEEP_DARK */
+  color: #E2E8F0;
   margin: 0;
-  padding: 0;
-  overflow: hidden; /* Mencegah scroll pada body utama karena kita pakai layout 100vh */
+  overflow: hidden; /* Mencegah double scrollbar di halaman utama */
 }

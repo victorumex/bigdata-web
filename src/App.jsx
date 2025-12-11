@@ -4,22 +4,23 @@ import {
   BarChart, Bar, Cell 
 } from 'recharts';
 import { 
-  TrendingUp, TrendingDown, Zap, AlertTriangle, ShieldHalf, RefreshCw, Menu, Wind, Clock, User, DollarSign
+  TrendingUp, TrendingDown, Zap, AlertTriangle, RefreshCw, 
+  Menu, Wind, DollarSign, Clock 
 } from 'lucide-react';
 
 // --- IMPORT DARI FOLDER LAIN ---
-import { supabase } from './services/supabaseClient'; 
-import { COMPANY_META } from './config/constants';
+import { supabase } from './services/supabaseClient';
+import { COMPANY_META, SENTIMENT_COLORS } from './config/constants';
 import { formatFullDate, getIndoMonth } from './utils/formatters';
 import BentoCard from './components/BentoCard';
-import StockLogo from './components/StockLogo'; 
+import StockLogo from './components/StockLogo';
 
-// --- KONSTANTA TEMA BARU (Deep Navy & Neon) ---
-const BG_DEEP_DARK = '#0A132C'; // Latar Belakang Sangat Gelap
-const CARD_BASE = '#1C294A'; // Warna Dasar Kartu (Biru Navy Gelap)
-const ACCENT_PRIMARY = '#05369D'; // Navy Blue untuk Aksen Utama
-const ACCENT_NEON = '#4B8BF5'; // Biru Neon untuk Garis/Highlight
-const TEXT_LIGHT = '#E0E7FF'; // Warna Teks (Putih kebiruan)
+// --- THEME CONSTANTS (Agar sesuai dengan style JSX Anda) ---
+const BG_DEEP_DARK = '#0B1221';
+const CARD_BASE = '#151E32';
+const TEXT_LIGHT = '#E2E8F0';
+const ACCENT_PRIMARY = '#3B82F6'; // Blue
+const ACCENT_NEON = '#60A5FA';    // Light Blue
 
 const App = () => {
   // --- STATE MANAGEMENT ---
@@ -29,102 +30,166 @@ const App = () => {
   const [newsData, setNewsData] = useState([]);
   const [currentDate] = useState(new Date());
 
-  // --- DATA FETCHING (Dipotong untuk fokus pada UI) ---
+  // --- 1. FETCH MARKET DATA (Daftar Saham & Harga Terbaru) ---
   const fetchMarketData = useCallback(async () => {
     try {
-      const codes = Object.keys(COMPANY_META);
-      let tempStockList = [];
+        const codes = Object.keys(COMPANY_META);
+        let tempStockList = [];
 
-      // --- SIMULASI DATA FETCHING ---
-      for (const code of codes) {
-        const price = Math.floor(Math.random() * 5000) + 1000;
-        tempStockList.push({
-          code: code,
-          name: COMPANY_META[code]?.name || 'Unknown Company',
-          price: price,
-          change: Math.random() * 0.05 - 0.02, 
-          volatility: Math.random() * 0.05
-        });
-      }
-      
-      setStockList(tempStockList);
-      if (!selectedStock && tempStockList.length > 0) {
-        setSelectedStock(tempStockList[0]);
-      }
-    } catch (err) { console.error(err); }
+        // Ambil harga terakhir dari tabel history (stock_prices)
+        for (const code of codes) {
+            const { data } = await supabase
+                .from('stock_prices')
+                .select('close')
+                .eq('symbol', code)
+                .order('date', { ascending: false })
+                .limit(1);
+            
+            const price = data && data.length > 0 ? data[0].close : 0;
+            
+            tempStockList.push({
+                code: code,
+                name: COMPANY_META[code].name,
+                type: COMPANY_META[code].type,
+                price: price,
+            });
+        }
+        
+        setStockList(tempStockList);
+        
+        // Default pilih saham pertama jika belum ada yang dipilih
+        if (!selectedStock && tempStockList.length > 0) {
+            setSelectedStock(tempStockList[0]);
+        }
+    } catch (err) { console.error("Error fetching market data:", err); }
   }, [selectedStock]);
 
+  // --- 2. FETCH CHART DATA (Grafik Historis) ---
   const fetchChartData = useCallback(async () => {
-      if (!selectedStock) return;
-      const dummyData = Array(30).fill(0).map((_, i) => ({
-          day: `${i + 1} ${getIndoMonth(new Date().getMonth()).substring(0, 3)}`,
-          // Simulasikan harga dengan sedikit noise di sekitar harga utama
-          price: Math.round(selectedStock.price * (1 + (Math.random() - 0.5) * 0.1)), 
-          forecast: null
-      })).reverse();
-      setChartData(dummyData);
+    if (!selectedStock) return;
+    
+    // Ambil 30 hari terakhir dari tabel stock_prices
+    const { data: historyData } = await supabase
+        .from('stock_prices') 
+        .select('date, close')
+        .eq('symbol', selectedStock.code)
+        .order('date', { ascending: false })
+        .limit(30);
+
+    if (historyData && historyData.length > 0) {
+        // Format data untuk Recharts
+        const mappedData = historyData.reverse().map(item => ({
+            day: formatFullDate(item.date),
+            price: item.close,
+        }));
+        setChartData(mappedData);
+    } else {
+        setChartData([]);
+    }
   }, [selectedStock]);
 
+  // --- 3. FETCH NEWS (Berita & Sentimen) ---
   const fetchNews = useCallback(async () => {
-      if (!selectedStock) return;
-      const dummyNews = [
-        { id: 1, title: `Harga ${selectedStock.code} diprediksi naik setelah rilis laporan Q3.`, source: 'News Source A', sentiment: 'positive' },
-        { id: 2, title: `Volatilitas pasar menahan laju pertumbuhan sektor teknologi.`, source: 'Tech Daily', sentiment: 'neutral' },
-        { id: 3, title: `Analisis teknikal menunjukkan sinyal jual kuat untuk ${selectedStock.code}.`, source: 'Market Insight', sentiment: 'negative' },
-        { id: 4, title: `Regime pasar menunjukkan tren sideways jangka pendek.`, source: 'Algo Report', sentiment: 'neutral' },
-        { id: 5, title: `Investor asing kembali melakukan aksi beli besar-besaran.`, source: 'IDX Watch', sentiment: 'positive' },
-        { id: 6, title: `Ada indikasi anomali volume perdagangan saham ini hari ini.`, source: 'Quant Analysis', sentiment: 'negative' },
-      ];
-      setNewsData(dummyNews);
+    if (!selectedStock) return;
+    
+    // Ambil berita dari tabel news_sentiment
+    let { data } = await supabase
+        .from('news_sentiment')
+        .select('*')
+        .eq('symbol', selectedStock.code) 
+        .order('published_at', { ascending: false })
+        .limit(10);
+
+    const mappedNews = data ? data.map(n => ({
+        id: n.id,
+        title: n.title,
+        source: n.source || 'News Source',
+        sentiment: n.sentiment_label ? n.sentiment_label.toLowerCase() : 'neutral',
+    })) : [];
+    setNewsData(mappedNews);
   }, [selectedStock]); 
 
+  // --- INITIAL EFFECTS ---
   useEffect(() => { fetchMarketData(); }, []);
+  
   useEffect(() => {
-    if (selectedStock) { fetchChartData(); fetchNews(); }
+    if (selectedStock) { 
+        fetchChartData(); 
+        fetchNews(); 
+    }
   }, [selectedStock, fetchChartData, fetchNews]);
 
-  // --- DERIVED DATA ---
+  // --- LOGIC: ANALISIS DATA (MEMO) ---
+  
+  // 1. Hitung Volatilitas & Regime (Simulasi sederhana based on chart)
   const volatilityData = useMemo(() => {
-      if (!selectedStock) return { volatility: 0, regime: 'N/A' };
-      const stockInfo = stockList.find(s => s.code === selectedStock.code);
-      const vol = stockInfo && stockInfo.volatility ? stockInfo.volatility : 0;
-      let regime = vol >= 0.03 ? 'High Volatility' : 'Low Volatility';
-      return { volatility: (vol * 100).toFixed(2), regime };
-  }, [selectedStock, stockList]);
+      if (chartData.length < 2) return { volatility: 0, regime: 'Low Volatility' };
+      
+      // Hitung perubahan harga harian sederhana
+      let sumChange = 0;
+      for(let i=1; i<chartData.length; i++) {
+        const prev = chartData[i-1].price;
+        const curr = chartData[i].price;
+        sumChange += Math.abs((curr - prev) / prev);
+      }
+      const avgVol = (sumChange / chartData.length) * 100;
+      
+      return { 
+          volatility: avgVol.toFixed(2), 
+          regime: avgVol > 1.5 ? 'High Volatility' : 'Low Volatility' 
+      };
+  }, [chartData]);
 
+  // 2. Breakdown Sentimen untuk BarChart
   const cnbcSentimentData = useMemo(() => {
-    if (!selectedStock || newsData.length === 0) return [];
+    if (!newsData.length) return [];
     const pos = newsData.filter(n => n.sentiment === 'positive').length;
     const neg = newsData.filter(n => n.sentiment === 'negative').length;
     const neu = newsData.filter(n => n.sentiment === 'neutral').length;
     const total = pos + neg + neu || 1;
     return [
-        { name: 'Pos', value: Math.round((pos/total)*100), color: '#34D399' }, 
-        { name: 'Neg', value: Math.round((neg/total)*100), color: '#F87171' }, 
-        { name: 'Neu', value: Math.round((neu/total)*100), color: '#60A5FA' }, 
+        { name: 'Pos', value: Math.round((pos/total)*100), color: SENTIMENT_COLORS.positive },
+        { name: 'Neg', value: Math.round((neg/total)*100), color: SENTIMENT_COLORS.negative },
+        { name: 'Neu', value: Math.round((neu/total)*100), color: SENTIMENT_COLORS.neutral },
     ];
-  }, [selectedStock, newsData]);
+  }, [newsData]);
 
+  // 3. Interpretasi Sinyal (BUY/SELL/HOLD)
   const priceForecastInterpretation = useMemo(() => {
-    const change = selectedStock?.change || 0;
-    const signal = change > 0.01 ? 'BUY' : change < -0.01 ? 'SELL' : 'HOLD';
-    const isPositive = change >= 0;
+    if (chartData.length < 2) return { signal: 'HOLD', diff: 0, isPositive: true };
+    
+    const lastPrice = chartData[chartData.length - 1].price;
+    const prevPrice = chartData[0].price; // Bandingkan dengan awal periode (30 hari lalu)
+    const diff = ((lastPrice - prevPrice) / prevPrice) * 100;
+    
+    let signal = 'HOLD';
+    if (diff > 5) signal = 'BUY';
+    if (diff < -5) signal = 'SELL';
 
     return { 
-      signal, 
-      diff: (change * 100).toFixed(2), 
-      endPrice: selectedStock?.price || 0,
-      isPositive 
+        signal, 
+        diff: diff.toFixed(2), 
+        isPositive: diff >= 0 
     };
-  }, [selectedStock]);
+  }, [chartData]);
 
-  if (!selectedStock) return <div className="h-screen flex items-center justify-center" style={{ backgroundColor: BG_DEEP_DARK, color: TEXT_LIGHT }}><RefreshCw className="animate-spin mr-2"/> Loading Dashboard...</div>;
 
-  const signalColor = priceForecastInterpretation.signal === 'BUY' ? '#34D399' : 
-                      priceForecastInterpretation.signal === 'SELL' ? '#F87171' : 
-                      '#FACC15'; 
+  // --- RENDER UI (Sesuai Request Anda) ---
 
-  // --- Tooltip Kustom untuk Chart ---
+  if (!selectedStock) 
+    return (
+      <div 
+        className="h-screen flex items-center justify-center"
+        style={{ backgroundColor: BG_DEEP_DARK, color: TEXT_LIGHT }}
+      >
+        <RefreshCw className="animate-spin mr-2"/> Loading Dashboard...
+      </div>
+    );
+
+  const signalColor = 
+    priceForecastInterpretation.signal === 'BUY' ? '#34D399' : 
+    priceForecastInterpretation.signal === 'SELL' ? '#F87171' : '#FACC15';
+
   const CustomTooltip = ({ active, payload, label }) => {
     if (active && payload && payload.length) {
       const priceValue = payload[0].value.toLocaleString(undefined, {
@@ -132,11 +197,18 @@ const App = () => {
         maximumFractionDigits: 2,
       });
       return (
-        <div className="p-3 rounded-lg shadow-lg text-sm" style={{ backgroundColor: CARD_BASE, border: `1px solid ${ACCENT_NEON}80` }}>
-          <p className="font-bold text-gray-300">{`Date : ${label}`}</p>
-          <p className="text-white mt-1">
-            <DollarSign className='w-3 h-3 inline mr-1 text-green-400'/>
-            {`Price : $${priceValue}`}
+        <div 
+          className="p-3 rounded-lg text-sm backdrop-blur-sm"
+          style={{ 
+            backgroundColor: '#1C294AEE', 
+            border: `1px solid ${ACCENT_NEON}60`,
+            color: TEXT_LIGHT 
+          }}
+        >
+          <p className="font-bold text-gray-300">{`Date: ${label}`}</p>
+          <p className="mt-1 flex items-center">
+            <DollarSign className="w-3 h-3 mr-1 text-green-400" />
+            {`$${priceValue}`}
           </p>
         </div>
       );
@@ -145,159 +217,203 @@ const App = () => {
   };
 
   return (
-    <div className="h-screen w-full p-2 sm:p-4 font-sans overflow-hidden" style={{ backgroundColor: BG_DEEP_DARK, color: TEXT_LIGHT }}>
+    <div 
+      className="h-screen w-full p-3 sm:p-4 font-sans overflow-hidden"
+      style={{ backgroundColor: BG_DEEP_DARK, color: TEXT_LIGHT }}
+    >
       
-      {/* 0. STOCKS AVAILABLE (HEADER FULL-WIDTH) */}
+      {/* STOCKS AVAILABLE */}
       <BentoCard 
-          className="w-full mb-4 px-4 py-2 flex items-center justify-start relative overflow-hidden" 
-          title="Stocks Available"
-          style={{ backgroundColor: CARD_BASE, border: `1px solid ${ACCENT_PRIMARY}` }}
+        className="w-full mb-4 px-3 py-2 rounded-xl"
+        title="Stocks Available"
+        style={{ backgroundColor: CARD_BASE, border: `1px solid ${ACCENT_PRIMARY}60` }}
       >
-        <div className="flex gap-6 overflow-x-auto w-full hide-scrollbar items-center">
-            {stockList.map(stock => (
-              <button 
-                key={stock.code}
-                onClick={() => setSelectedStock(stock)}
-                // Styling Tombol Saham yang Kece
-                className={`flex-shrink-0 flex flex-col items-center justify-center p-3 rounded-xl transition-all duration-300 transform 
-                            ${selectedStock.code === stock.code ? 'ring-2 ring-offset-2 ring-offset-[#0A132C] scale-105 shadow-xl' : 'opacity-70 hover:opacity-100'}`}
-                style={{ 
-                    borderColor: selectedStock.code === stock.code ? ACCENT_NEON : 'transparent', 
-                    backgroundColor: selectedStock.code === stock.code ? ACCENT_PRIMARY : CARD_BASE, 
-                    minWidth: '100px',
-                    boxShadow: selectedStock.code === stock.code ? `0 0 15px ${ACCENT_NEON}50` : 'none'
-                }}
-              >
-                <StockLogo code={stock.code} className="w-10 h-10 rounded-full bg-white p-1 mb-1 shadow-md" />
-                <span className="font-bold text-sm mt-1">{stock.code.replace('.JK','')}</span>
-              </button>
-            ))}
+        <div className="flex gap-3 overflow-x-auto hide-scrollbar py-1">
+          {stockList.map(stock => (
+            <button 
+              key={stock.code}
+              onClick={() => setSelectedStock(stock)}
+              className={`flex-shrink-0 flex flex-col items-center justify-center p-2.5 rounded-lg transition-all duration-200
+                ${selectedStock.code === stock.code 
+                  ? 'ring-2 ring-offset-1 ring-offset-[#0A132C] ring-[#4B8BF5] scale-[1.03] shadow-[0_0_12px_#4B8BF540]' 
+                  : 'opacity-80 hover:opacity-100 hover:bg-[#26355b]'}`}
+              style={{ 
+                backgroundColor: selectedStock.code === stock.code ? ACCENT_PRIMARY : 'transparent',
+                minWidth: '88px'
+              }}
+            >
+              <StockLogo code={stock.code} className="w-9 h-9 rounded bg-white p-0.5 shadow" />
+              <span className="font-semibold text-xs mt-1 text-center">{stock.code.replace('.JK','')}</span>
+            </button>
+          ))}
         </div>
       </BentoCard>
 
-      {/* GRID CONTAINER UTAMA (12 Kolom, 9 Baris tersisa) */}
-      <div className="grid grid-cols-12 grid-rows-9 gap-4 h-[calc(100vh-120px)] w-full max-w-[1920px] mx-auto">
+      <div className="grid grid-cols-12 grid-rows-9 gap-3 h-[calc(100vh-112px)] w-full max-w-7xl mx-auto">
         
-        {/* KIRI (8 KOLOM) */}
-        
-        {/* 1. JUDUL & DATA UTAMA (col-span-8 row-span-2) */}
+        {/* Judul & Data Utama */}
         <BentoCard 
-            className="col-span-8 row-span-2 p-6 flex flex-col justify-between relative overflow-hidden" 
-            style={{ backgroundColor: CARD_BASE, border: `1px solid ${ACCENT_PRIMARY}80` }}
+          className="col-span-8 row-span-2 p-5 rounded-xl flex justify-between items-start"
+          style={{ backgroundColor: CARD_BASE, border: `1px solid ${ACCENT_PRIMARY}50` }}
         >
-          <div className="flex justify-between items-start z-20">
-            <div>
-              <p className="text-sm uppercase font-semibold text-gray-400">Selected Stock / {currentDate.getFullYear()}</p>
-              <h1 className="text-5xl font-extrabold tracking-tight mt-1" style={{ color: ACCENT_NEON }}>
-                {selectedStock.code.replace('.JK','')}
-              </h1>
-              <p className="text-lg font-medium text-gray-300">{selectedStock.name}</p>
-            </div>
-            <div className="text-right">
-              <h2 className="text-5xl font-bold">
-                ${selectedStock.price.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
-              </h2>
-              <span className={`text-md font-bold px-3 py-1 rounded-full mt-1 inline-flex items-center ${priceForecastInterpretation.isPositive ? 'bg-green-700/50 text-green-300' : 'bg-red-700/50 text-red-300'}`}>
-                {priceForecastInterpretation.isPositive ? <TrendingUp className='w-4 h-4 mr-1'/> : <TrendingDown className='w-4 h-4 mr-1'/>}
-                {priceForecastInterpretation.diff}%
-              </span>
-            </div>
+          <div>
+            <p className="text-xs uppercase font-medium text-gray-400 tracking-wide">Selected Stock • {currentDate.getFullYear()}</p>
+            <h1 className="text-4xl font-bold mt-1" style={{ color: ACCENT_NEON }}>
+              {selectedStock.code.replace('.JK','')}
+            </h1>
+            <p className="text-base text-gray-300 mt-0.5">{selectedStock.name}</p>
           </div>
-          {/* Efek Neon di Sudut */}
-          <div className="absolute inset-0 z-0 opacity-[0.1]" style={{ background: `radial-gradient(circle at 100% 100%, ${ACCENT_NEON} 0%, transparent 40%)` }}></div>
+          <div className="text-right">
+            <h2 className="text-3xl font-bold">
+              ${selectedStock.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </h2>
+            <span className={`text-sm font-semibold px-2.5 py-1 rounded-full mt-1 inline-flex items-center ${
+              priceForecastInterpretation.isPositive 
+                ? 'bg-green-900/40 text-green-300' 
+                : 'bg-red-900/40 text-red-300'
+            }`}>
+              {priceForecastInterpretation.isPositive ? 
+                <TrendingUp className="w-3.5 h-3.5 mr-1" /> : 
+                <TrendingDown className="w-3.5 h-3.5 mr-1" />
+              }
+              {priceForecastInterpretation.diff}%
+            </span>
+          </div>
         </BentoCard>
 
-        {/* 2. CHART AREA (col-span-8 row-span-5) */}
+        {/* Chart Area */}
         <BentoCard 
-            className="col-span-8 row-span-5 p-2 relative group" 
-            title="Market Trend Analysis (30D)"
-            style={{ backgroundColor: CARD_BASE }}
+          className="col-span-8 row-span-5 p-3 rounded-xl"
+          title="Market Trend Analysis (30D)"
+          style={{ backgroundColor: CARD_BASE }}
         >
-          <div className="w-full h-full pt-4">
+          <div className="w-full h-full pt-2">
             {chartData.length > 0 ? (
-                <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart
-                        data={chartData}
-                        margin={{ top: 10, right: 10, left: -20, bottom: 0 }}
-                    >
-                        <defs>
-                            <linearGradient id="colorPrice" x1="0" y1="0" x2="0" y2="1">
-                                <stop offset="5%" stopColor={ACCENT_NEON} stopOpacity={0.8}/>
-                                <stop offset="95%" stopColor={ACCENT_NEON} stopOpacity={0}/>
-                            </linearGradient>
-                        </defs>
-                        <XAxis dataKey="day" stroke="#555" tick={{fontSize: 10}} axisLine={false} tickLine={false}/>
-                        <YAxis stroke="#555" tickFormatter={(v) => `$${v.toLocaleString()}`} domain={['auto', 'auto']} tick={{fontSize: 10}}/>
-                        <CartesianGrid strokeDasharray="4 4" stroke="#333"/>
-                        <Tooltip content={<CustomTooltip />} />
-                        
-                        <Area type="monotone" dataKey="price" stroke={ACCENT_NEON} fillOpacity={1} fill="url(#colorPrice)" dot={false} strokeWidth={3}/>
-                    </AreaChart>
-                </ResponsiveContainer>
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart
+                  data={chartData}
+                  margin={{ top: 10, right: 10, left: -15, bottom: 5 }}
+                >
+                  <defs>
+                    <linearGradient id="colorPrice" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor={ACCENT_NEON} stopOpacity={0.6}/>
+                      <stop offset="95%" stopColor={ACCENT_NEON} stopOpacity={0}/>
+                    </linearGradient>
+                  </defs>
+                  <XAxis dataKey="day" stroke="#555" tick={{ fontSize: 9 }} axisLine={false} tickLine={false} />
+                  <YAxis 
+                    stroke="#555" 
+                    tickFormatter={(v) => `$${v.toLocaleString()}`} 
+                    tick={{ fontSize: 9 }} 
+                    domain={['auto', 'auto']} 
+                  />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#2A3B5C" />
+                  <Tooltip content={<CustomTooltip />} />
+                  <Area 
+                    type="monotone" 
+                    dataKey="price" 
+                    stroke={ACCENT_NEON} 
+                    strokeWidth={2} 
+                    fillOpacity={1} 
+                    fill="url(#colorPrice)" 
+                    dot={false} 
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
             ) : (
-                <div className="h-full w-full flex items-center justify-center text-gray-500">Fetching Historical Data...</div>
+              <div className="h-full flex items-center justify-center text-gray-600 text-sm">
+                Fetching Historical Data...
+              </div>
             )}
           </div>
         </BentoCard>
 
-        {/* 3. SINYAL AI (col-span-4 row-span-2) */}
+        {/* AI Forecast Signal */}
         <BentoCard 
-            className="col-span-4 row-span-2 p-4 flex flex-col justify-between" 
-            title="AI Forecast Signal"
-            style={{ backgroundColor: ACCENT_PRIMARY, boxShadow: `0 0 20px ${ACCENT_NEON}50` }}
+          className="col-span-4 row-span-2 p-4 rounded-xl flex flex-col justify-between"
+          title="AI Forecast Signal"
+          style={{ 
+            backgroundColor: `${ACCENT_PRIMARY}CC`, 
+            backdropFilter: 'blur(8px)',
+            border: `1px solid ${ACCENT_NEON}40`,
+            boxShadow: '0 4px 20px rgba(75, 139, 245, 0.2)' 
+          }}
         >
-            <div className='flex items-center justify-between mt-2'>
-                <div className='flex flex-col'>
-                    <p className="text-blue-200 text-sm uppercase mb-1">Recommended Action</p>
-                    <h2 className="text-5xl font-black tracking-tighter" style={{ color: signalColor }}>
-                        {priceForecastInterpretation.signal}
-                    </h2>
-                </div>
-                {/* Ikon besar dengan glow effect */}
-                <div className="h-20 w-20 rounded-full flex items-center justify-center shadow-lg" style={{ backgroundColor: '#fff' + '10', color: TEXT_LIGHT, border: `2px solid ${TEXT_LIGHT}80`, boxShadow: `0 0 10px ${TEXT_LIGHT}80` }}>
-                    <Zap className='w-10 h-10 animate-pulse' style={{ color: signalColor }}/>
-                </div>
+          <div className="flex justify-between items-start">
+            <div>
+              <p className="text-blue-200 text-xs uppercase mb-1">Recommended Action</p>
+              <h2 className="text-4xl font-black tracking-tight" style={{ color: signalColor }}>
+                {priceForecastInterpretation.signal}
+              </h2>
             </div>
-            
-            <div className="flex justify-between items-end border-t border-blue-600 pt-3 mt-3 text-blue-100">
-                <div className='flex items-center text-sm font-semibold'>
-                    <Wind className='w-4 h-4 mr-1 text-blue-200' /> Volatility Index
-                </div>
-                <span className={`text-sm px-2 py-0.5 rounded font-bold ${volatilityData.regime === 'High Volatility' ? 'bg-orange-700/50 text-orange-300' : 'bg-teal-700/50 text-teal-300'}`}>
-                    {volatilityData.volatility}% ({volatilityData.regime})
-                </span>
+            <div 
+              className="h-16 w-16 rounded-full flex items-center justify-center"
+              style={{ 
+                background: 'rgba(255, 255, 255, 0.08)', 
+                border: `1px solid rgba(224, 231, 255, 0.3)`,
+                boxShadow: `0 0 8px ${signalColor}60`
+              }}
+            >
+              <Zap className="w-8 h-8 animate-pulse" style={{ color: signalColor }} />
             </div>
+          </div>
+          
+          <div className="flex justify-between items-center border-t border-blue-600/40 pt-2.5 mt-2 text-blue-200 text-sm">
+            <div className="flex items-center">
+              <Wind className="w-3.5 h-3.5 mr-1 text-blue-300" /> Volatility Index
+            </div>
+            <span className={`px-2 py-0.5 rounded text-xs font-bold ${
+              volatilityData.regime === 'High Volatility' 
+                ? 'bg-orange-900/50 text-orange-300' 
+                : 'bg-teal-900/50 text-teal-300'
+            }`}>
+              {volatilityData.volatility}% ({volatilityData.regime})
+            </span>
+          </div>
         </BentoCard>
 
-        {/* 4. METRIK KUNCI (col-span-4 row-span-2) */}
+        {/* Key Metrics */}
         <BentoCard 
-            className="col-span-4 row-span-2 p-4 grid grid-cols-2 gap-3" 
-            title="Key Metrics"
-            style={{ backgroundColor: CARD_BASE }}
+          className="col-span-4 row-span-2 p-3 rounded-xl grid grid-cols-2 gap-2"
+          title="Key Metrics"
+          style={{ backgroundColor: CARD_BASE }}
         >
-            <MetricBox label="Change (24H)" value={`${priceForecastInterpretation.diff}%`} color={priceForecastInterpretation.isPositive ? 'text-green-400' : 'text-red-400'} icon={DollarSign}/>
-            <MetricBox label="Sentiment Pos" value={`${cnbcSentimentData.find(d => d.name === 'Pos')?.value || 0}%`} color="text-green-400" icon={TrendingUp}/>
-            <MetricBox label="Sentiment Neg" value={`${cnbcSentimentData.find(d => d.name === 'Neg')?.value || 0}%`} color="text-red-400" icon={TrendingDown}/>
-            <MetricBox label="Anomaly Status" value="Normal" color="text-teal-400" icon={AlertTriangle}/>
+          <MetricBox label="Change (30D)" value={`${priceForecastInterpretation.diff}%`} color={priceForecastInterpretation.isPositive ? 'text-green-400' : 'text-red-400'} icon={DollarSign}/>
+          <MetricBox label="Sentiment Pos" value={`${cnbcSentimentData.find(d => d.name === 'Pos')?.value || 0}%`} color="text-green-400" icon={TrendingUp}/>
+          <MetricBox label="Sentiment Neg" value={`${cnbcSentimentData.find(d => d.name === 'Neg')?.value || 0}%`} color="text-red-400" icon={TrendingDown}/>
+          <MetricBox label="Anomaly Status" value="Normal" color="text-teal-400" icon={AlertTriangle}/>
         </BentoCard>
         
-        {/* 5. SENTIMEN CHART (col-span-4 row-span-3) */}
+        {/* Sentiment Chart */}
         <BentoCard 
-            className="col-span-4 row-span-3 p-4" 
-            title="News Sentiment Breakdown"
-            style={{ backgroundColor: CARD_BASE }}
+          className="col-span-4 row-span-3 p-3 rounded-xl"
+          title="News Sentiment Breakdown"
+          style={{ backgroundColor: CARD_BASE }}
         >
-          <div className="h-full w-full pt-4">
+          <div className="h-full w-full pt-2">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={cnbcSentimentData} layout="vertical">
+              <BarChart data={cnbcSentimentData} layout="vertical" margin={{ left: 10, right: 10 }}>
                 <XAxis type="number" hide />
-                <YAxis dataKey="name" type="category" stroke="#555" tick={{fill: TEXT_LIGHT, fontSize: 10}} axisLine={false} tickLine={false} width={40}/>
-                <Tooltip 
-                    cursor={{ fill: '#333' }} 
-                    formatter={(value) => [`${value}% Sentimen`]}
-                    contentStyle={{ backgroundColor: CARD_BASE, border: `1px solid ${ACCENT_NEON}`, color: TEXT_LIGHT }}
+                <YAxis 
+                  dataKey="name" 
+                  type="category" 
+                  stroke="#555" 
+                  tick={{ fill: TEXT_LIGHT, fontSize: 10 }} 
+                  axisLine={false} 
+                  tickLine={false} 
+                  width={35}
                 />
-                <Bar dataKey="value" radius={[4, 4, 4, 4]} barSize={15}>
+                <Tooltip 
+                  cursor={{ fill: '#263353' }} 
+                  formatter={(value) => [`${value}%`]}
+                  contentStyle={{ 
+                    backgroundColor: CARD_BASE, 
+                    border: `1px solid ${ACCENT_NEON}80`, 
+                    color: TEXT_LIGHT,
+                    borderRadius: '6px'
+                  }}
+                />
+                <Bar dataKey="value" radius={[3, 3, 3, 3]} barSize={14}>
                   {cnbcSentimentData.map((entry, index) => (
                     <Cell key={`cell-${index}`} fill={entry.color} />
                   ))}
@@ -307,68 +423,53 @@ const App = () => {
           </div>
         </BentoCard>
 
-        {/* 6. LIST BERITA (col-span-8 row-span-2) */}
+        {/* News Feed */}
         <BentoCard 
-            className="col-span-8 row-span-2 p-4 flex flex-col" 
-            title="Recent Activities / News Feed"
-            style={{ backgroundColor: CARD_BASE }}
+          className="col-span-8 row-span-2 p-3 rounded-xl flex flex-col"
+          title="Recent Activities / News Feed"
+          style={{ backgroundColor: CARD_BASE }}
         >
-          <div className="flex-1 overflow-y-auto mt-4 space-y-2 pr-2 custom-scrollbar">
+          <div className="flex-1 overflow-y-auto mt-2 space-y-2 pr-1 custom-scrollbar">
             {newsData.slice(0, 4).map((news, i) => (
-              <div key={i} className="flex items-start p-3 rounded-lg hover:bg-[#32456C] transition-colors border-b border-gray-700 last:border-0">
-                  <Clock className='w-4 h-4 flex-shrink-0 mt-1 text-gray-500'/>
-                  <div className="ml-3 flex-1">
-                      <p className="text-sm font-semibold leading-snug hover:text-blue-300 cursor-pointer">{news.title}</p>
-                      <div className="flex justify-between items-center mt-1">
-                          <span className="text-xs text-gray-500">{news.source}</span>
-                          <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase ${news.sentiment === 'positive' ? 'bg-green-800/70 text-green-400' : news.sentiment === 'negative' ? 'bg-red-800/70 text-red-400' : 'bg-blue-800/70 text-blue-400'}`}>
-                              {news.sentiment}
-                          </span>
-                      </div>
+              <div 
+                key={i} 
+                className="flex items-start p-2.5 rounded-lg hover:bg-[#26355b]/60 transition-colors border border-transparent hover:border-[#32456C]"
+              >
+                <Clock className="w-3.5 h-3.5 mt-0.5 text-gray-500 flex-shrink-0" />
+                <div className="ml-2.5 flex-1">
+                  <p className="text-sm text-gray-200 leading-relaxed">{news.title}</p>
+                  <div className="flex justify-between items-center mt-1.5">
+                    <span className="text-xs text-gray-500">{news.source}</span>
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold uppercase ${
+                      news.sentiment === 'positive' ? 'bg-green-900/60 text-green-400' : 
+                      news.sentiment === 'negative' ? 'bg-red-900/60 text-red-400' : 
+                      'bg-blue-900/60 text-blue-400'
+                    }`}>
+                      {news.sentiment}
+                    </span>
                   </div>
+                </div>
               </div>
             ))}
           </div>
         </BentoCard>
 
       </div>
-      
-      {/* GLOBAL STYLES (Agar scrollbar terlihat keren) */}
-      <style jsx global>{`
-        .hide-scrollbar {
-            -ms-overflow-style: none;
-            scrollbar-width: none;
-        }
-        .hide-scrollbar::-webkit-scrollbar {
-            display: none;
-        }
-
-        .custom-scrollbar::-webkit-scrollbar {
-          width: 6px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-track {
-          background: ${BG_DEEP_DARK};
-        }
-        .custom-scrollbar::-webkit-scrollbar-thumb {
-          background: ${ACCENT_NEON};
-          border-radius: 3px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-          background: ${ACCENT_NEON};
-        }
-      `}</style>
     </div>
   );
 };
 
-// Komponen Pembantu untuk Metrik
+// --- HELPER COMPONENT ---
 const MetricBox = ({ label, value, color, icon: Icon }) => (
-    <div className='p-3 rounded-xl' style={{ backgroundColor: '#263353', border: `1px solid ${ACCENT_PRIMARY}` }}>
-        <div className='flex items-center text-xs text-gray-400 uppercase'>
-            <Icon className='w-3 h-3 mr-1'/> {label}
-        </div>
-        <p className={`text-xl font-bold mt-1 ${color}`}>{value}</p>
+  <div 
+    className="p-2.5 rounded-lg"
+    style={{ backgroundColor: '#263353', border: `1px solid ${ACCENT_PRIMARY}40` }}
+  >
+    <div className="flex items-center text-[10px] text-gray-400 uppercase">
+      <Icon className="w-2.5 h-2.5 mr-1" /> {label}
     </div>
+    <p className={`text-lg font-bold mt-0.5 ${color}`}>{value}</p>
+  </div>
 );
 
 export default App;
