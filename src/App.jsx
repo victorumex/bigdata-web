@@ -4,14 +4,16 @@ import {
   BarChart, Bar, Cell 
 } from 'recharts';
 import { 
-  TrendingUp, TrendingDown, Zap, AlertTriangle, ShieldHalf, RefreshCw, Menu, Wind, Clock, User, DollarSign
+  TrendingUp, TrendingDown, Zap, AlertTriangle, ShieldHalf, RefreshCw, Menu, Wind, Clock, User, DollarSign, Activity, GitCommit
 } from 'lucide-react';
 
 // --- IMPORT DARI FOLDER LAIN ---
 import { supabase } from './services/supabaseClient'; 
-import { COMPANY_META } from './config/constants';
+// Asumsi COMPANY_META sekarang ada di file ini atau sudah dimodifikasi
+// import { COMPANY_META } from './config/constants';
 import { formatFullDate, getIndoMonth } from './utils/formatters';
 import BentoCard from './components/BentoCard';
+// StockLogo sekarang menerima URL
 import StockLogo from './components/StockLogo'; 
 
 // --- KONSTANTA TEMA BARU (Deep Navy & Neon) ---
@@ -21,6 +23,27 @@ const ACCENT_PRIMARY = '#05369D'; // Navy Blue untuk Aksen Utama
 const ACCENT_NEON = '#4B8BF5'; // Biru Neon untuk Garis/Highlight
 const TEXT_LIGHT = '#E0E7FF'; // Warna Teks (Putih kebiruan)
 
+// --- KONSTANTA SAHAM BARU & SIMULASI LOGO ---
+const STOCKS_TO_FETCH = [
+    "AAPL", "MSFT", "GOOGL", "AMZN", "TSLA",
+    "META", "NVDA", "NFLX", "AMD", "BABA", "CRM" // Tambahan
+];
+
+// Simulasi Data Meta (Gantilah dengan URL logo nyata jika ada)
+const COMPANY_META = {
+    "AAPL": { name: "Apple Inc.", logo: "https://logo.clearbit.com/apple.com" },
+    "MSFT": { name: "Microsoft Corp.", logo: "https://logo.clearbit.com/microsoft.com" },
+    "GOOGL": { name: "Alphabet Inc.", logo: "https://logo.clearbit.com/google.com" },
+    "AMZN": { name: "Amazon.com Inc.", logo: "https://logo.clearbit.com/amazon.com" },
+    "TSLA": { name: "Tesla Inc.", logo: "https://logo.clearbit.com/tesla.com" },
+    "META": { name: "Meta Platforms Inc.", logo: "https://logo.clearbit.com/meta.com" },
+    "NVDA": { name: "NVIDIA Corp.", logo: "https://logo.clearbit.com/nvidia.com" },
+    "NFLX": { name: "Netflix Inc.", logo: "https://logo.clearbit.com/netflix.com" },
+    "AMD": { name: "Advanced Micro Devices", logo: "https://logo.clearbit.com/amd.com" },
+    "BABA": { name: "Alibaba Group Holding", logo: "https://logo.clearbit.com/alibaba.com" },
+    "CRM": { name: "Salesforce", logo: "https://logo.clearbit.com/salesforce.com" },
+};
+
 const App = () => {
   // --- STATE MANAGEMENT ---
   const [stockList, setStockList] = useState([]);
@@ -29,21 +52,33 @@ const App = () => {
   const [newsData, setNewsData] = useState([]);
   const [currentDate] = useState(new Date());
 
-  // --- DATA FETCHING (Dipotong untuk fokus pada UI) ---
+  // --- DATA FETCHING (DIREVISI UNTUK ANOMALI & LOGO) ---
   const fetchMarketData = useCallback(async () => {
     try {
-      const codes = Object.keys(COMPANY_META);
+      const codes = STOCKS_TO_FETCH;
       let tempStockList = [];
 
-      // --- SIMULASI DATA FETCHING ---
       for (const code of codes) {
+        // --- SIMULASI DATA FETCHING ---
+        // Asumsi data ini sudah diolah dengan IsolationForest di Backend/Python
         const price = Math.floor(Math.random() * 5000) + 1000;
+        const change = Math.random() * 0.05 - 0.02;
+        const volatility = Math.random() * 0.05;
+
+        // Simulasi Anomali & Regim (Berdasarkan Logika IsolationForest/Volatilitas)
+        const isAnomaly = Math.random() < 0.1; // 10% peluang Anomali
+        const anomalyStatus = isAnomaly ? 'ANOMALI' : 'NORMAL';
+        const volatilityRegime = volatility >= 0.03 ? 'HIGH VOL' : 'LOW VOL';
+
         tempStockList.push({
           code: code,
           name: COMPANY_META[code]?.name || 'Unknown Company',
+          logoUrl: COMPANY_META[code]?.logo, // Tambahkan URL Logo
           price: price,
-          change: Math.random() * 0.05 - 0.02, 
-          volatility: Math.random() * 0.05
+          change: change,
+          volatility: volatility,
+          anomaly_status: anomalyStatus, // Data Anomali
+          volatility_regime: volatilityRegime // Data Regim
         });
       }
       
@@ -58,7 +93,6 @@ const App = () => {
       if (!selectedStock) return;
       const dummyData = Array(30).fill(0).map((_, i) => ({
           day: `${i + 1} ${getIndoMonth(new Date().getMonth()).substring(0, 3)}`,
-          // Simulasikan harga dengan sedikit noise di sekitar harga utama
           price: Math.round(selectedStock.price * (1 + (Math.random() - 0.5) * 0.1)), 
           forecast: null
       })).reverse();
@@ -73,7 +107,6 @@ const App = () => {
         { id: 3, title: `Analisis teknikal menunjukkan sinyal jual kuat untuk ${selectedStock.code}.`, source: 'Market Insight', sentiment: 'negative' },
         { id: 4, title: `Regime pasar menunjukkan tren sideways jangka pendek.`, source: 'Algo Report', sentiment: 'neutral' },
         { id: 5, title: `Investor asing kembali melakukan aksi beli besar-besaran.`, source: 'IDX Watch', sentiment: 'positive' },
-        { id: 6, title: `Ada indikasi anomali volume perdagangan saham ini hari ini.`, source: 'Quant Analysis', sentiment: 'negative' },
       ];
       setNewsData(dummyNews);
   }, [selectedStock]); 
@@ -86,13 +119,14 @@ const App = () => {
   // --- DERIVED DATA ---
   const volatilityData = useMemo(() => {
       if (!selectedStock) return { volatility: 0, regime: 'N/A' };
-      const stockInfo = stockList.find(s => s.code === selectedStock.code);
-      const vol = stockInfo && stockInfo.volatility ? stockInfo.volatility : 0;
-      let regime = vol >= 0.03 ? 'High Volatility' : 'Low Volatility';
-      return { volatility: (vol * 100).toFixed(2), regime };
-  }, [selectedStock, stockList]);
+      return { 
+          volatility: (selectedStock.volatility * 100).toFixed(2), 
+          regime: selectedStock.volatility_regime 
+      };
+  }, [selectedStock]);
 
   const cnbcSentimentData = useMemo(() => {
+    // Logika Sentimen (dipertahankan)
     if (!selectedStock || newsData.length === 0) return [];
     const pos = newsData.filter(n => n.sentiment === 'positive').length;
     const neg = newsData.filter(n => n.sentiment === 'negative').length;
@@ -106,6 +140,7 @@ const App = () => {
   }, [selectedStock, newsData]);
 
   const priceForecastInterpretation = useMemo(() => {
+    // Logika Sinyal (dipertahankan)
     const change = selectedStock?.change || 0;
     const signal = change > 0.01 ? 'BUY' : change < -0.01 ? 'SELL' : 'HOLD';
     const isPositive = change >= 0;
@@ -123,6 +158,10 @@ const App = () => {
   const signalColor = priceForecastInterpretation.signal === 'BUY' ? '#34D399' : 
                       priceForecastInterpretation.signal === 'SELL' ? '#F87171' : 
                       '#FACC15'; 
+                      
+  const isAnomaly = selectedStock.anomaly_status === 'ANOMALI';
+  const anomalyColor = isAnomaly ? '#FBBF24' : '#34D399'; // Kuning/Oranye untuk Anomali, Hijau untuk Normal
+
 
   // --- Tooltip Kustom untuk Chart ---
   const CustomTooltip = ({ active, payload, label }) => {
@@ -144,6 +183,16 @@ const App = () => {
     return null;
   };
 
+  // --- Komponen Pembantu untuk Metrik (Diperbarui) ---
+  const MetricBox = ({ label, value, color, icon: Icon }) => (
+      <div className='p-3 rounded-xl' style={{ backgroundColor: '#263353', border: `1px solid ${ACCENT_PRIMARY}` }}>
+          <div className='flex items-center text-xs text-gray-400 uppercase'>
+              <Icon className='w-3 h-3 mr-1'/> {label}
+          </div>
+          <p className={`text-xl font-bold mt-1 ${color}`}>{value}</p>
+      </div>
+  );
+
   return (
     <div className="h-screen w-full p-2 sm:p-4 font-sans overflow-hidden" style={{ backgroundColor: BG_DEEP_DARK, color: TEXT_LIGHT }}>
       
@@ -158,7 +207,6 @@ const App = () => {
               <button 
                 key={stock.code}
                 onClick={() => setSelectedStock(stock)}
-                // Styling Tombol Saham yang Kece
                 className={`flex-shrink-0 flex flex-col items-center justify-center p-3 rounded-xl transition-all duration-300 transform 
                             ${selectedStock.code === stock.code ? 'ring-2 ring-offset-2 ring-offset-[#0A132C] scale-105 shadow-xl' : 'opacity-70 hover:opacity-100'}`}
                 style={{ 
@@ -168,7 +216,12 @@ const App = () => {
                     boxShadow: selectedStock.code === stock.code ? `0 0 15px ${ACCENT_NEON}50` : 'none'
                 }}
               >
-                <StockLogo code={stock.code} className="w-10 h-10 rounded-full bg-white p-1 mb-1 shadow-md" />
+                {/* MENGGUNAKAN LOGO URL DARI COMPANY_META */}
+                <StockLogo 
+                    code={stock.code} 
+                    imageUrl={stock.logoUrl} // Meneruskan URL Logo
+                    className="w-10 h-10 rounded-full bg-white p-1 mb-1 shadow-md" 
+                />
                 <span className="font-bold text-sm mt-1">{stock.code.replace('.JK','')}</span>
               </button>
             ))}
@@ -183,6 +236,7 @@ const App = () => {
         {/* 1. JUDUL & DATA UTAMA (col-span-8 row-span-2) */}
         <BentoCard 
             className="col-span-8 row-span-2 p-6 flex flex-col justify-between relative overflow-hidden" 
+            title={selectedStock.name}
             style={{ backgroundColor: CARD_BASE, border: `1px solid ${ACCENT_PRIMARY}80` }}
         >
           <div className="flex justify-between items-start z-20">
@@ -203,7 +257,6 @@ const App = () => {
               </span>
             </div>
           </div>
-          {/* Efek Neon di Sudut */}
           <div className="absolute inset-0 z-0 opacity-[0.1]" style={{ background: `radial-gradient(circle at 100% 100%, ${ACCENT_NEON} 0%, transparent 40%)` }}></div>
         </BentoCard>
 
@@ -253,7 +306,6 @@ const App = () => {
                         {priceForecastInterpretation.signal}
                     </h2>
                 </div>
-                {/* Ikon besar dengan glow effect */}
                 <div className="h-20 w-20 rounded-full flex items-center justify-center shadow-lg" style={{ backgroundColor: '#fff' + '10', color: TEXT_LIGHT, border: `2px solid ${TEXT_LIGHT}80`, boxShadow: `0 0 10px ${TEXT_LIGHT}80` }}>
                     <Zap className='w-10 h-10 animate-pulse' style={{ color: signalColor }}/>
                 </div>
@@ -261,24 +313,34 @@ const App = () => {
             
             <div className="flex justify-between items-end border-t border-blue-600 pt-3 mt-3 text-blue-100">
                 <div className='flex items-center text-sm font-semibold'>
-                    <Wind className='w-4 h-4 mr-1 text-blue-200' /> Volatility Index
+                    <Wind className='w-4 h-4 mr-1 text-blue-200' /> Volatility Regime
                 </div>
-                <span className={`text-sm px-2 py-0.5 rounded font-bold ${volatilityData.regime === 'High Volatility' ? 'bg-orange-700/50 text-orange-300' : 'bg-teal-700/50 text-teal-300'}`}>
-                    {volatilityData.volatility}% ({volatilityData.regime})
+                <span className={`text-sm px-2 py-0.5 rounded font-bold ${selectedStock.volatility_regime === 'HIGH VOL' ? 'bg-orange-700/50 text-orange-300' : 'bg-teal-700/50 text-teal-300'}`}>
+                    {selectedStock.volatility_regime}
                 </span>
             </div>
         </BentoCard>
 
-        {/* 4. METRIK KUNCI (col-span-4 row-span-2) */}
+        {/* 4. ANOMALY & REGIME BOXES (col-span-4 row-span-2) */}
         <BentoCard 
             className="col-span-4 row-span-2 p-4 grid grid-cols-2 gap-3" 
-            title="Key Metrics"
+            title="Model Diagnostics"
             style={{ backgroundColor: CARD_BASE }}
         >
+            <div className='p-3 rounded-xl col-span-2' style={{ backgroundColor: '#263353', border: `1px solid ${ACCENT_PRIMARY}` }}>
+                <div className='flex items-center text-xs text-gray-400 uppercase'>
+                    <Activity className='w-4 h-4 mr-1'/> Anomaly Detection (iForest)
+                </div>
+                <div className='flex justify-between items-center mt-1'>
+                    <p className='text-3xl font-bold' style={{ color: anomalyColor }}>
+                        {selectedStock.anomaly_status}
+                    </p>
+                    {isAnomaly && <AlertTriangle className='w-6 h-6 animate-pulse' style={{ color: anomalyColor }} />}
+                </div>
+            </div>
+            
             <MetricBox label="Change (24H)" value={`${priceForecastInterpretation.diff}%`} color={priceForecastInterpretation.isPositive ? 'text-green-400' : 'text-red-400'} icon={DollarSign}/>
-            <MetricBox label="Sentiment Pos" value={`${cnbcSentimentData.find(d => d.name === 'Pos')?.value || 0}%`} color="text-green-400" icon={TrendingUp}/>
-            <MetricBox label="Sentiment Neg" value={`${cnbcSentimentData.find(d => d.name === 'Neg')?.value || 0}%`} color="text-red-400" icon={TrendingDown}/>
-            <MetricBox label="Anomaly Status" value="Normal" color="text-teal-400" icon={AlertTriangle}/>
+            <MetricBox label="Vol Index" value={`${volatilityData.volatility}%`} color="text-yellow-400" icon={Wind}/>
         </BentoCard>
         
         {/* 5. SENTIMEN CHART (col-span-4 row-span-3) */}
@@ -360,15 +422,5 @@ const App = () => {
     </div>
   );
 };
-
-// Komponen Pembantu untuk Metrik
-const MetricBox = ({ label, value, color, icon: Icon }) => (
-    <div className='p-3 rounded-xl' style={{ backgroundColor: '#263353', border: `1px solid ${ACCENT_PRIMARY}` }}>
-        <div className='flex items-center text-xs text-gray-400 uppercase'>
-            <Icon className='w-3 h-3 mr-1'/> {label}
-        </div>
-        <p className={`text-xl font-bold mt-1 ${color}`}>{value}</p>
-    </div>
-);
 
 export default App;
